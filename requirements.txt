@@ -1,0 +1,6 @@
+streamlit
+pandas
+openpyxl
+reportlab
+streamlit-geolocation
+streamlit-js-eval
