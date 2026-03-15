@@ -9,6 +9,14 @@ def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
+    # BOQ Descriptions Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS boq_descriptions (
+            boq_number INTEGER PRIMARY KEY,
+            description_of_work TEXT NOT NULL
+        )
+    ''')
+    
     # BOQ Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS boqs (
@@ -70,6 +78,7 @@ def init_db():
             
             -- Status 
             status TEXT DEFAULT 'Pending',
+            is_deleted INTEGER DEFAULT 0,
             FOREIGN KEY (boq_number) REFERENCES boqs (boq_number)
         )
     ''')
@@ -114,6 +123,71 @@ def insert_measurement(boq_number, project_name, contractor_name, sub_contractor
     conn.close()
     return hash_value
 
+def add_boq_description(boq_number, description):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('''
+            INSERT INTO boq_descriptions (boq_number, description_of_work)
+            VALUES (?, ?)
+        ''', (boq_number, description))
+        conn.commit()
+        success = True
+    except sqlite3.IntegrityError:
+        success = False
+    conn.close()
+    return success
+
+def edit_boq_description(boq_number, new_description):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute('''
+            UPDATE boq_descriptions
+            SET description_of_work = ?
+            WHERE boq_number = ?
+        ''', (new_description, boq_number))
+        conn.commit()
+        success = True
+    except Exception:
+        success = False
+    conn.close()
+    return success
+
+def delete_boq_description(boq_number):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # Check if any measurements exist (including soft-deleted ones)
+    c.execute("SELECT COUNT(*) FROM measurements WHERE boq_number=?", (str(boq_number),))
+    count = c.fetchone()[0]
+    if count > 0:
+        conn.close()
+        return False, "Cannot delete BOQ because it has associated measurements."
+        
+    try:
+        c.execute("DELETE FROM boq_descriptions WHERE boq_number=?", (boq_number,))
+        conn.commit()
+        success = True
+        msg = "BOQ deleted effectively."
+    except Exception as e:
+        success = False
+        msg = str(e)
+    conn.close()
+    return success, msg
+
+def get_all_boq_descriptions():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT * FROM boq_descriptions ORDER BY boq_number ASC")
+    columns = [description[0] for description in c.description]
+    rows = c.fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        results.append(dict(zip(columns, row)))
+    return results
+
 def get_all_measurements():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -138,6 +212,24 @@ def get_measurement_by_id(measurement_id):
     if row:
         return dict(zip(columns, row))
     return None
+
+def soft_delete_measurement(measurement_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    # Only allow delete if status is not Approved
+    c.execute("SELECT status FROM measurements WHERE id=?", (measurement_id,))
+    res = c.fetchone()
+    if not res:
+        conn.close()
+        return False, "Measurement not found."
+    if res[0] == 'Approved':
+        conn.close()
+        return False, "Cannot delete an approved measurement."
+        
+    c.execute("UPDATE measurements SET is_deleted=1, status='Deleted' WHERE id=?", (measurement_id,))
+    conn.commit()
+    conn.close()
+    return True, "Measurement successfully marked as deleted."
 
 def verify_tampering(measurement_id):
     record = get_measurement_by_id(measurement_id)

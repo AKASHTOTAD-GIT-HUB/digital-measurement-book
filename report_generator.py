@@ -37,6 +37,7 @@ def generate_pdf_report(measurement_id):
     info_data = [
         ["Project Name:", record['project_name']],
         ["BOQ Number:", record['boq_number']],
+        ["Description:", record['description']],
         ["Contractor Name:", record['contractor_name']],
         ["Sub-Contractor Name:", record['sub_contractor_name']],
         ["Date of Commencement:", record['date_commencement']],
@@ -56,10 +57,9 @@ def generate_pdf_report(measurement_id):
     # Measurement Details
     elements.append(Paragraph("<b>Measurement Entries</b>", heading_style))
     meas_data = [
-        ["Description", "No", "L (m)", "B (m)", "D/H (m)", "Qty", "Remarks"]
+        ["No", "L (m)", "B (m)", "D/H (m)", "Qty", "Remarks"]
     ]
     meas_data.append([
-        Paragraph(str(record['description'] or ""), normal_style),
         str(record['number_items']),
         str(record['length']),
         str(record['breadth']),
@@ -68,7 +68,7 @@ def generate_pdf_report(measurement_id):
         Paragraph(str(record['remarks'] or ""), normal_style)
     ])
     
-    meas_table = Table(meas_data, colWidths=[150, 30, 45, 45, 50, 50, 100])
+    meas_table = Table(meas_data, colWidths=[40, 60, 60, 70, 70, 150])
     meas_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4a4a4a")),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),

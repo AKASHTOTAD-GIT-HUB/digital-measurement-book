@@ -26,16 +26,16 @@ def export_to_excel(measurement_id=None):
     measurement_cols = [
         'id', 'boq_number', 'project_name', 'contractor_name', 'sub_contractor_name', 'date_commencement', 'finish_date', 'date_measurement',
         'description', 'number_items', 'length', 'breadth', 'depth_height', 'quantity',
-        'remarks', 'gps_coordinates', 'hash_value', 'timestamp', 'status'
+        'remarks', 'gps_coordinates', 'hash_value', 'timestamp', 'status', 'is_deleted'
     ]
     df_measurements = df[measurement_cols].copy()
     
-    # Sheet 2: Billing details
+    # Sheet 2: Billing details (excluding deleted items)
     billing_cols = [
         'boq_number', 'project_name', 'description', 'number_items', 'length', 'breadth', 'depth_height', 'quantity',
-        'rate', 'amount', 'prev_bill_number', 'prev_bill_date', 'prev_bill_amount', 'total_payable'
+        'rate', 'amount', 'prev_bill_number', 'prev_bill_date', 'prev_bill_amount', 'total_payable', 'status'
     ]
-    df_billing = df[billing_cols].copy()
+    df_billing = df[df['is_deleted'] == 0][billing_cols].copy()
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
