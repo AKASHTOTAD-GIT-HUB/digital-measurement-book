@@ -4,19 +4,26 @@ import sqlite3
 
 from database import DB_FILE
 
-def export_to_excel(measurement_id=None):
+def export_to_excel(project_id=None, measurement_id=None):
     """
     Exports measurements to an Excel file.
     """
     conn = sqlite3.connect(DB_FILE)
     
     query = "SELECT * FROM measurements"
-    params = ()
+    params = []
+    conditions = []
+    if project_id:
+        conditions.append("project_id=?")
+        params.append(project_id)
     if measurement_id:
-        query += " WHERE id=?"
-        params = (measurement_id,)
+        conditions.append("id=?")
+        params.append(measurement_id)
         
-    df = pd.read_sql_query(query, conn, params=params)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+        
+    df = pd.read_sql_query(query, conn, params=tuple(params))
     conn.close()
     
     if df.empty:

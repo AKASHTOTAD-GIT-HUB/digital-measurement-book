@@ -1,7 +1,7 @@
 import sqlite3
 from database import DB_FILE
 
-def get_or_create_boq(boq_number, project_name, contractor_name, sub_contractor_name, date_commencement, finish_date):
+def get_or_create_boq(boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date):
     """
     Retrieves a BOQ or creates it if it doesn't exist.
     """
@@ -14,9 +14,9 @@ def get_or_create_boq(boq_number, project_name, contractor_name, sub_contractor_
     
     if not row:
         c.execute('''
-            INSERT INTO boqs (boq_number, project_name, contractor_name, sub_contractor_name, date_commencement, finish_date, prev_bill_date, prev_bill_number, prev_bill_amount)
-            VALUES (?, ?, ?, ?, ?, ?, '', '', 0.0)
-        ''', (boq_number, project_name, contractor_name, sub_contractor_name, date_commencement, finish_date))
+            INSERT INTO boqs (boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, prev_bill_date, prev_bill_number, prev_bill_amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0.0)
+        ''', (boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date))
         conn.commit()
         # Fetch the newly created record
         c.execute("SELECT * FROM boqs WHERE boq_number=?", (boq_number,))
@@ -25,6 +25,16 @@ def get_or_create_boq(boq_number, project_name, contractor_name, sub_contractor_
     conn.close()
     if row:
         return dict(zip(columns, row))
+    return None
+
+def get_latest_bill_for_project(project_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT bill_no, bill_date, amount FROM billing WHERE project_id=? ORDER BY id DESC LIMIT 1", (project_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {'bill_no': row[0], 'bill_date': row[1], 'amount': row[2]}
     return None
 
 def get_all_boqs():
@@ -52,10 +62,11 @@ def get_boq(boq_number):
         return dict(zip(columns, row))
     return None
 
-def update_billing_and_boq(measurement_id, rate, amount, prev_bill_amount, prev_bill_date, prev_bill_number, total_payable):
+def update_billing_and_boq(measurement_id, project_id, rate, amount, prev_bill_amount, prev_bill_date, prev_bill_number, total_payable):
     """
     Updates the measurement record with billing info, AND updates the master BOQ
     record so the next bill pulls these newly updated 'previous' values.
+    Also inserts into the new project-specific billing table.
     """
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -67,26 +78,22 @@ def update_billing_and_boq(measurement_id, rate, amount, prev_bill_amount, prev_
         WHERE id=?
     ''', (rate, amount, prev_bill_amount, prev_bill_date, prev_bill_number, total_payable, measurement_id))
     
-    # 2. Get the boq_number for this measurement to update the BOQ master
+    # 2. Insert into billing
+    from datetime import date
+    today_str = date.today().isoformat()
+    new_prev_bill_number = f"BILL-{measurement_id}"
+    
+    c.execute('''
+        INSERT INTO billing (project_id, bill_no, bill_date, bill_name, amount, status)
+        VALUES (?, ?, ?, ?, ?, 'Approved')
+    ''', (project_id, new_prev_bill_number, today_str, f"Bill for Measurement {measurement_id}", total_payable))
+
+    # 3. Get the boq_number for this measurement to update the BOQ master
     c.execute("SELECT boq_number FROM measurements WHERE id=?", (measurement_id,))
     res = c.fetchone()
     if res:
         boq_num = res[0]
         # Make the current bill the "previous bill" for the next measurement
-        # Normally the "current bill number" or date would be generated today.
-        # Since the UI inputs prev_bill_number for this bill, the next "prev bill" 
-        # should technically be the ONE WE JUST CREATED.
-        
-        # We will assume that `prev_bill_date` from the UI refers to the date of the PREVIOUS bill.
-        # So we need to set the BOQ's prev_bill_date to TODAY, prev_bill_number to something, and prev_bill_amount to total_payable.
-        # Let's say `total_payable` becomes the new `prev_bill_amount`.
-        # For simplicity, let's just use the current date as the new prev_bill_date.
-        from datetime import date
-        today_str = date.today().isoformat()
-        
-        # Let's generate a "bill number" if not provided, or just use measurement id prefix
-        new_prev_bill_number = f"BILL-{measurement_id}"
-        
         c.execute('''
             UPDATE boqs
             SET prev_bill_date=?, prev_bill_number=?, prev_bill_amount=?

@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from database import init_db, insert_measurement, get_all_measurements, verify_tampering, add_boq_description, get_all_boq_descriptions, edit_boq_description, delete_boq_description, soft_delete_measurement
-from boq_manager import get_or_create_boq, get_all_boqs, update_billing_and_boq
+from database import init_db, insert_measurement, get_all_measurements, verify_tampering, add_boq_description, get_boq_descriptions_for_project, get_boq_description, edit_boq_description, delete_boq_description, soft_delete_measurement, add_project, edit_project, soft_delete_project, get_all_projects
+from boq_manager import get_or_create_boq, get_all_boqs, update_billing_and_boq, get_latest_bill_for_project
 from excel_export import export_to_excel
 from report_generator import generate_pdf_report
 from streamlit_geolocation import streamlit_geolocation
@@ -48,190 +48,322 @@ else:
 
 
 st.title("🏗️ Professional Blockchain-Enabled Digital Measurement Book")
+st.markdown("### Project-Based Digital Measurement Book - Live Version")
 
 st.info("🌐 **Cloud Ready:** This application is configured for global access from any device.")
+
+# --- GLOBAL PROJECT SELECTION ---
+projects = get_all_projects()
+selected_project = None
+project_options = {}
+
+if st.session_state.role == "Site Engineer":
+    active_projects = [p for p in projects if p.get('status', 'active') == 'active']
+    if not active_projects:
+        st.error("No Active Projects Available")
+    else:
+        project_options = {p['project_name']: p for p in active_projects}
+        sel_proj_label = st.selectbox("🏗️ Select Project", list(project_options.keys()))
+        selected_project = project_options[sel_proj_label]
+else:
+    if not projects:
+        st.warning("No Projects Available.")
+    else:
+        for p in projects:
+            lbl = f"{p['project_name']} (Inactive)" if p.get('status') == 'inactive' else p['project_name']
+            project_options[lbl] = p
+            
+        sel_proj_label = st.selectbox("🏗️ Select Project", list(project_options.keys()))
+        selected_project = project_options[sel_proj_label]
 
 # Determine Tabs based on Role
 if st.session_state.role == "Site Engineer":
     tabs = st.tabs(["📝 Site Measurement Entry", "📊 Site Engineer Dashboard"])
 else:
-    tabs = st.tabs(["📊 Manager Dashboard", "📝 BOQ Management", "💼 Manager Billing Panel", "📥 Download Report"])
+    tabs = st.tabs(["📊 Manager Dashboard", "📝 BOQ Management", "🏢 Project Management", "💼 Manager Billing Panel", "📥 Download Report"])
 
 # --- TAB: BOQ MANAGEMENT (Manager Only) ---
 if st.session_state.role == "Manager":
     with tabs[1]:
         st.header("📝 BOQ Description Management")
-        st.write("Create sequential numeric BOQ numbers with permanent descriptions.")
+        st.write("Manage BOQ numbers with permanent descriptions for the selected project.")
         
-        # Load existing descriptions
-        boq_descs = get_all_boq_descriptions()
-        if boq_descs:
-            df_desc = pd.DataFrame(boq_descs)
-            st.dataframe(df_desc, use_container_width=True, hide_index=True)
-            next_boq = max([d['boq_number'] for d in boq_descs]) + 1
+        if not selected_project:
+            st.warning("⚠️ Please select a project from the top dropdown to manage its BOQs.")
         else:
-            st.info("No BOQ descriptions exist yet.")
-            next_boq = 1
-            
-        with st.container():
-            t1, t2, t3 = st.tabs(["➕ Add BOQ", "✏️ Edit BOQ", "🗑️ Delete BOQ"])
-            
-            with t1:
-                with st.form("add_boq_form"):
-                    st.subheader("➕ Add New BOQ Description")
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        new_boq_num = st.number_input("BOQ Number", min_value=next_boq, max_value=next_boq, value=next_boq, disabled=True)
-                    with col2:
-                        new_desc = st.text_input("Description of Work", placeholder="e.g. Excavation for foundation")
+            p_id = selected_project['id']
+            # Load existing descriptions for the selected project
+            boq_descs = get_boq_descriptions_for_project(p_id)
+            if boq_descs:
+                df_desc = pd.DataFrame(boq_descs)[['boq_number', 'description']]
+                st.dataframe(df_desc, use_container_width=True, hide_index=True)
+            else:
+                st.info("No BOQ descriptions exist yet for this project.")
+                
+            with st.container():
+                t1, t2, t3 = st.tabs(["➕ Add BOQ", "✏️ Edit BOQ", "🗑️ Delete BOQ"])
+                
+                with t1:
+                    with st.form("add_boq_form"):
+                        st.subheader("➕ Add New BOQ Description")
+                        col1, col2 = st.columns([1, 4])
+                        with col1:
+                            new_boq_num = st.text_input("BOQ Number", placeholder="e.g. 1 or 1.1")
+                        with col2:
+                            new_desc = st.text_input("Description of Work", placeholder="e.g. Excavation for foundation")
+                            
+                        submit_boq = st.form_submit_button("Save BOQ Description")
                         
-                    submit_boq = st.form_submit_button("Save BOQ Description")
-                    
-                    if submit_boq:
-                        if not new_desc.strip():
-                            st.error("Description of Work cannot be empty.")
-                        else:
-                            success = add_boq_description(new_boq_num, new_desc.strip())
-                            if success:
-                                st.success(f"Successfully added BOQ #{new_boq_num}: {new_desc}")
-                                st.rerun()
+                        if submit_boq:
+                            if not new_boq_num.strip():
+                                st.error("BOQ Number cannot be empty.")
+                            elif not new_desc.strip():
+                                st.error("Description of Work cannot be empty.")
                             else:
-                                st.error(f"BOQ Number {new_boq_num} already exists.")
-            
-            with t2:
-                with st.form("edit_boq_form"):
-                    st.subheader("✏️ Edit Existing BOQ Description")
-                    if boq_descs:
-                        boq_options = {d['boq_number']: d['description_of_work'] for d in boq_descs}
-                        edit_num = st.selectbox("Select BOQ to Edit", list(boq_options.keys()))
-                        edit_desc = st.text_input("New Description of Work", value=boq_options.get(edit_num, ""))
-                        submit_edit = st.form_submit_button("Update BOQ")
-                        
-                        if submit_edit:
-                            if not edit_desc.strip():
-                                st.error("Description cannot be empty.")
-                            else:
-                                if edit_boq_description(edit_num, edit_desc.strip()):
-                                    st.success("Successfully updated BOQ Description!")
+                                success, msg = add_boq_description(p_id, new_boq_num.strip(), new_desc.strip())
+                                if success:
+                                    st.success(f"Successfully added BOQ #{new_boq_num}: {new_desc}")
                                     st.rerun()
                                 else:
-                                    st.error("Failed to update BOQ.")
-                    else:
-                        st.info("No BOQ records to edit.")
+                                    st.error(msg)
+                
+                with t2:
+                    with st.form("edit_boq_form"):
+                        st.subheader("✏️ Edit Existing BOQ Description")
+                        if boq_descs:
+                            boq_options = {d['boq_number']: d['description'] for d in boq_descs}
+                            edit_num = st.selectbox("Select BOQ to Edit", list(boq_options.keys()))
+                            edit_desc = st.text_input("New Description of Work", value=boq_options.get(edit_num, ""))
+                            submit_edit = st.form_submit_button("Update BOQ")
+                            
+                            if submit_edit:
+                                if not edit_desc.strip():
+                                    st.error("Description cannot be empty.")
+                                else:
+                                    if edit_boq_description(p_id, edit_num, edit_desc.strip()):
+                                        st.success("Successfully updated BOQ Description!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to update BOQ.")
+                        else:
+                            st.info("No BOQ records to edit.")
+                
+                with t3:
+                    with st.form("delete_boq_form"):
+                        st.subheader("🗑️ Delete Unused BOQ")
+                        if boq_descs:
+                            del_num = st.selectbox("Select BOQ to Delete", list(boq_options.keys()))
+                            submit_del = st.form_submit_button("Delete BOQ")
+                            if submit_del:
+                                success, msg = delete_boq_description(p_id, del_num)
+                                if success:
+                                    st.success("Successfully deleted BOQ!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Cannot delete BOQ: {msg}")
+                        else:
+                            st.info("No BOQ records to delete.")
+
+# --- TAB: PROJECT MANAGEMENT (Manager Only) ---
+if st.session_state.role == "Manager":
+    with tabs[2]:
+        st.header("🏢 Project Management")
+        st.write("Manage all construction projects in the system.")
+        
+        if projects:
+            df_proj = pd.DataFrame(projects)
+            def style_proj_rows(row):
+                if row['status'] == 'inactive':
+                    return ['color: #6c757d; background-color: #f8f9fa'] * len(row)
+                return [''] * len(row)
+            st.dataframe(df_proj.style.apply(style_proj_rows, axis=1), use_container_width=True, hide_index=True)
+        else:
+            st.info("No projects created yet.")
             
-            with t3:
-                with st.form("delete_boq_form"):
-                    st.subheader("🗑️ Delete Unused BOQ")
-                    if boq_descs:
-                        del_num = st.selectbox("Select BOQ to Delete", list(boq_options.keys()))
-                        submit_del = st.form_submit_button("Delete BOQ")
-                        if submit_del:
-                            success, msg = delete_boq_description(del_num)
-                            if success:
-                                st.success("Successfully deleted BOQ!")
+        with st.container():
+            pt1, pt2, pt3 = st.tabs(["➕ Add Project", "✏️ Edit Project", "🗑️ Soft Delete Project"])
+            
+            with pt1:
+                with st.form("add_proj_form"):
+                    new_proj_name = st.text_input("New Project Name")
+                    if st.form_submit_button("Add Project"):
+                        if not new_proj_name.strip():
+                            st.error("Project name cannot be empty.")
+                        else:
+                            succ, msg = add_project(new_proj_name.strip())
+                            if succ:
+                                st.success(msg)
                                 st.rerun()
                             else:
-                                st.error(f"Cannot delete BOQ: {msg}")
+                                st.error(msg)
+            
+            with pt2:
+                with st.form("edit_proj_form"):
+                    if projects:
+                        edit_sel = st.selectbox("Select Project to Edit", list(project_options.keys()))
+                        new_name = st.text_input("New Name for Project")
+                        if st.form_submit_button("Update Project"):
+                            if not new_name.strip():
+                                st.error("Name cannot be empty.")
+                            else:
+                                p_id = (project_options or {}).get(edit_sel, {}).get('id')
+                                succ, msg = edit_project(p_id, new_name.strip())
+                                if succ:
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
                     else:
-                        st.info("No BOQ records to delete.")
+                        st.info("No projects to edit.")
+                        st.form_submit_button("Update Project", disabled=True)
+                        
+            with pt3:
+                with st.form("del_proj_form"):
+                    if projects:
+                        active_only_proj = {k: v for k, v in project_options.items() if v and isinstance(v, dict) and v.get('status', 'active') == 'active'}
+                        if active_only_proj:
+                            del_sel = st.selectbox("Select Project to Soft Delete", list(active_only_proj.keys()))
+                            if st.form_submit_button("Delete (Soft)"):
+                                p_id = active_only_proj.get(del_sel, {}).get('id')
+                                if soft_delete_project(p_id):
+                                    st.success("Project marked as inactive.")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete project.")
+                        else:
+                            st.info("No active projects to delete.")
+                            st.form_submit_button("Delete", disabled=True)
+                    else:
+                        st.info("No projects available.")
+                        st.form_submit_button("Delete", disabled=True)
 
 # --- TAB: SITE MEASUREMENT ENTRY (Engineer Only) ---
 if st.session_state.role == "Site Engineer":
     with tabs[0]:
-        with st.form("measurement_form"):
-            st.header("📁 Project Information")
-            col1, col2 = st.columns(2)
-            with col1: 
-                project_name = st.text_input("Project Name")
+        st.header("📝 Site Measurement Entry")
+        
+        # 1. Selection Block OUTSIDE the form to enable immediate Reactivity
+        st.subheader("📁 Project & BOQ Information")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            project_name_disp = selected_project['project_name'] if selected_project else "No Project Selected"
+            st.text_input("Active Project", value=project_name_disp, disabled=True)
+            
+            if selected_project:
+                st.session_state.selected_project_id = selected_project['id']
+                st.session_state.selected_project_name = selected_project['project_name']
                 
-                # Fetch available BOQs for dropdown
-                boq_descs = get_all_boq_descriptions()
-                boq_options = {d['boq_number']: d['description_of_work'] for d in boq_descs}
+                boq_descs = get_boq_descriptions_for_project(selected_project['id'])
+                boq_list = [d['boq_number'] for d in boq_descs]
                 
-                if boq_options:
-                    boq_number = st.selectbox("BOQ Number", list(boq_options.keys()))
-                else:
-                    st.warning("No BOQs configured. Manager must add BOQs first.")
-                    boq_number = None
+                if boq_list:
+                    if "selected_boq" not in st.session_state:
+                         st.session_state.selected_boq = None
                     
-            with col2:
-                contractor_name = st.text_input("Contractor Name")
-                sub_contractor_name = st.text_input("Sub-Contractor Name")
-                col2a, col2b = st.columns(2)
-                with col2a: date_commencement = st.date_input("Date of Commencement")
-                with col2b: finish_date = st.date_input("Finish Date")
+                    selected_boq = st.selectbox("BOQ Number", boq_list, key="selected_boq")
+                    boq_number = str(selected_boq) if selected_boq is not None else None
+                else:
+                    st.warning("No BOQs configured for this project. Manager must add BOQs first.")
+                    boq_number = None
+            else:
+                st.session_state.selected_project_id = None
+                boq_list = []
+                boq_number = None
 
-            st.markdown("---")
-            st.header("📏 Measurement Details")
-            
-            # Auto current date logic
-            current_date_str = datetime.datetime.today().strftime('%d-%m-%Y')
-            st.info(f"**Date of Measurement:** {current_date_str} (Auto-generated)")
-            date_measurement = datetime.date.today()
-            
-            # Auto-fill description based on selected BOQ
-            if boq_number and boq_number in boq_options:
-                description = boq_options[boq_number]
-                st.text_area("Description of Work (Auto-filled by BOQ)", value=description, disabled=True, height=100)
+        with col2:
+            if boq_number:
+                description = get_boq_description(st.session_state.selected_project_id, boq_number)
             else:
                 description = ""
-                st.text_area("Description of Work", value="Select a valid BOQ Number above", disabled=True, height=100)
+            
+            # Debug logging requested by user
+            st.write("Project ID:", st.session_state.selected_project_id)
+            st.write("Selected BOQ:", boq_number)
+            st.write("Fetched Description:", description)
+            
+            st.text_area("Selected BOQ Context", value=description, disabled=True, height=120)
 
-            c1, c2, c3, c4, c5 = st.columns(5)
-            with c1: num_items = st.number_input("Number (No. of items)", min_value=1.0, value=1.0, step=1.0)
-            with c2: length = st.number_input("Length (m)", min_value=0.0, format="%.2f")
-            with c3: breadth = st.number_input("Breadth (m)", min_value=0.0, format="%.2f")
-            with c4: depth_height = st.number_input("Depth / Height (m)", min_value=0.0, format="%.2f")
-            with c5: remarks = st.text_input("Remarks")
-            
-            calc_vol = num_items * (length if length else 1.0) * (breadth if breadth else 1.0) * (depth_height if depth_height else 1.0)
-            if length == 0.0 and breadth == 0.0 and depth_height == 0.0:
-                calc_vol = 0.0
-            
-            st.info(f"**Calculated Quantity:** {calc_vol:.3f}")
-            
-            st.markdown("---")
-            st.header("📷 Photo Evidence & Verification")
-            
-            col_v1, col_v2, col_v3 = st.columns(3)
-            with col_v1:
-                st.subheader("📍 Live GPS")
-                try:
-                    location = streamlit_geolocation()
-                except Exception:
-                    location = None
+        # 2. Measurement Submission block INSIDE the form
+        if boq_number:
+            with st.form("site_engineer_form"):
+                st.header("📏 Measurement Details")
+                # Auto current date logic
+                current_date_str = datetime.datetime.today().strftime('%d-%m-%Y')
+                st.info(f"**Date of Measurement:** {current_date_str} (Auto-generated)")
+                date_measurement = datetime.date.today()
+                
+                fc1, fc2, fc3 = st.columns(3)
+                with fc1: contractor_name = st.text_input("Contractor Name")
+                with fc2: sub_contractor_name = st.text_input("Sub-Contractor Name")
+                with fc3:
+                    date_commencement = st.date_input("Date of Commencement")
+                    finish_date = st.date_input("Finish Date")
                     
-                if location and location.get('latitude') and location.get('longitude'):
-                    auto_gps = f"{location['latitude']},{location['longitude']}"
-                    st.success(f"Captured: {auto_gps}")
-                else:
-                    auto_gps = ""
-                    st.info("Click the location button above to get automatic GPS.")
+                st.markdown("---")
+
+                c1, c2, c3, c4, c5 = st.columns(5)
+                with c1: num_items = st.number_input("Number (No. of items)", min_value=1.0, value=1.0, step=1.0)
+                with c2: length = st.number_input("Length (m)", min_value=0.0, format="%.2f")
+                with c3: breadth = st.number_input("Breadth (m)", min_value=0.0, format="%.2f")
+                with c4: depth_height = st.number_input("Depth / Height (m)", min_value=0.0, format="%.2f")
+                with c5: remarks = st.text_input("Remarks")
+                
+                calc_vol = num_items * (length if length else 1.0) * (breadth if breadth else 1.0) * (depth_height if depth_height else 1.0)
+                if length == 0.0 and breadth == 0.0 and depth_height == 0.0:
+                    calc_vol = 0.0
+                
+                st.info(f"**Calculated Quantity:** {calc_vol:.3f}")
+                
+                st.markdown("---")
+                st.header("📷 Photo Evidence & Verification")
+                
+                col_v1, col_v2, col_v3 = st.columns(3)
+                with col_v1:
+                    st.subheader("📍 Live GPS")
+                    try:
+                        location = streamlit_geolocation()
+                    except Exception:
+                        location = None
+                        
+                    if location and location.get('latitude') and location.get('longitude'):
+                        auto_gps = f"{location['latitude']},{location['longitude']}"
+                        st.success(f"Captured: {auto_gps}")
+                    else:
+                        auto_gps = ""
+                        st.info("Click the location button above to get automatic GPS.")
+                        
+                    gps_coords = st.text_input("GPS Coordinates", value=auto_gps)
                     
-                gps_coords = st.text_input("GPS Coordinates", value=auto_gps)
+                with col_v2:
+                    st.subheader("📸 Engineer Verification")
+                    selfie_photo = st.camera_input("Engineer Verification Photo (Selfie)", key="selfie")
+                    
+                with col_v3:
+                    st.subheader("📸 Site Work Photo")
+                    site_photo = st.camera_input("Site Work Photo", key="site")
+                    
+                # Submit Button explicitly inside the form construct
+                submit_btn = st.form_submit_button("Submit Measurement", type="primary")
                 
-            with col_v2:
-                st.subheader("📸 Engineer Verification")
-                selfie_photo = st.camera_input("Engineer Verification Photo (Selfie)", key="selfie")
-                
-            with col_v3:
-                st.subheader("📸 Site Work Photo")
-                site_photo = st.camera_input("Site Work Photo", key="site")
-                
-            submit_btn = st.form_submit_button("Submit Measurement", type="primary")
-            
+            # Handle submit OUTSIDE the form structure
             if submit_btn:
-                if not boq_number or not project_name or not contractor_name or not description or not gps_coords or not selfie_photo or not site_photo:
-                    st.error("Please fill all mandatory fields: BOQ Number, Project Name, Contractor Name, Description, GPS Coordinates, and Both Photos.")
+                if not st.session_state.selected_project_id:
+                    st.error("You must select an active project first.")
+                elif not contractor_name or not description or not gps_coords or not selfie_photo or not site_photo:
+                    st.error("Please fill all mandatory fields: Contractor Name, Description, GPS Coordinates, and Both Photos.")
                 else:
                     try:
-                        get_or_create_boq(boq_number, project_name, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date))
+                        p_id = st.session_state.selected_project_id
+                        p_name = st.session_state.selected_project_name
+                        # Ensure BOQ exists in boqs table for tracking
+                        get_or_create_boq(boq_number, p_name, p_id, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date))
                         ts = datetime.datetime.now().isoformat()
                         selfie_bytes = selfie_photo.getvalue()
                         site_bytes = site_photo.getvalue()
                         
                         h_val = insert_measurement(
-                            str(boq_number), project_name, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date), str(date_measurement),
+                            str(boq_number), p_name, p_id, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date), str(date_measurement),
                             description, num_items, length, breadth, depth_height, calc_vol,
                             remarks, gps_coords, selfie_bytes, site_bytes, ts
                         )
@@ -245,6 +377,11 @@ dash_tab = tabs[1] if st.session_state.role == "Site Engineer" else tabs[0]
 with dash_tab:
     st.header(f"📊 {'Site Engineer ' if st.session_state.role == 'Site Engineer' else ''}Dashboard - Measurement Records")
     records = get_all_measurements()
+    if selected_project:
+        records = [r for r in records if r.get('project_id') == selected_project['id']]
+    else:
+        records = []
+        
     if records:
         df = pd.DataFrame(records)
         display_df = df[['id', 'boq_number', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'status', 'is_deleted']].copy()
@@ -281,24 +418,23 @@ with dash_tab:
                 st.info("No pending measurements eligible for deletion.")
             
     else:
-        st.info("No records found.")
+        st.info("No records found for the selected project.")
 
 # --- TAB: MANAGER BILLING PANEL (Manager Only) ---
 if st.session_state.role == "Manager":
-    with tabs[2]:
+    with tabs[3]:
         st.header("💰 Manager Billing Panel")
         records = get_all_measurements()
         # Exclude softly deleted measurements from billing possibilities entirely
-        records = [r for r in records if r.get('is_deleted', 0) == 0]
+        if selected_project:
+            records = [r for r in records if r.get('is_deleted', 0) == 0 and r.get('project_id') == selected_project['id']]
+        else:
+            records = []
+            
         if records:
             record_options = {f"ID: {r['id']} - BOQ: {r['boq_number']} - {r['project_name']}": r for r in records}
             selected_label = st.selectbox("Select Measurement Record to Review & Bill", list(record_options.keys()))
             sel_rec = record_options[selected_label]
-            
-            # Fetch latest BOQ details to pre-populate Previous Bill info
-            boqs = get_all_boqs()
-            boq_dict = {b['boq_number']: b for b in boqs}
-            current_boq = boq_dict.get(sel_rec['boq_number'], {})
             
             st.markdown("---")
             with st.container():
@@ -314,9 +450,15 @@ if st.session_state.role == "Manager":
             
             with st.form("billing_form"):
                 st.subheader("📜 Bill Calculation")
-                # Auto load from boq record
-                def_prev_amt = sel_rec['prev_bill_amount'] if sel_rec['prev_bill_amount'] > 0 else current_boq.get('prev_bill_amount', 0.0)
-                def_prev_no = sel_rec['prev_bill_number'] if sel_rec['prev_bill_number'] else current_boq.get('prev_bill_number', "N/A")
+                
+                # Auto load from LAST BILL for the project!
+                last_bill = get_latest_bill_for_project((selected_project or {}).get('id'))
+                if last_bill and isinstance(last_bill, dict):
+                    def_prev_amt = last_bill.get('amount', 0.0)
+                    def_prev_no = last_bill.get('bill_no', 'N/A')
+                else:
+                    def_prev_amt = 0.0
+                    def_prev_no = "N/A"
                 
                 # Auto populated read-only fields for current bill
                 current_bill_date = datetime.datetime.today().strftime("%d-%m-%Y")
@@ -345,23 +487,28 @@ if st.session_state.role == "Manager":
                 
                 if update_btn and not is_approved:
                     try:
-                        update_billing_and_boq(sel_rec['id'], rate, amt, float(def_prev_amt), current_bill_date, def_prev_no, tot)
+                        update_billing_and_boq(sel_rec['id'], selected_project['id'], rate, amt, float(def_prev_amt), current_bill_date, def_prev_no, tot)
                         st.success("Billing details updated, Bill Approved, and Measurement successfully Locked!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Failed to approve bill: {e}")
         else:
-            st.info("No records available to bill.")
+            st.info("No records available to bill for the selected project.")
 
 # --- TAB: DOWNLOAD REPORT (Manager Only) ---
 if st.session_state.role == "Manager":
-    with tabs[3]:
+    with tabs[4]:
         st.header("📄 Export Official Reports")
         records = get_all_measurements()
+        if selected_project:
+            records = [r for r in records if r.get('project_id') == selected_project['id']]
+        else:
+            records = []
+            
         if records:
             st.subheader("Excel Export")
-            st.write("Contains all measurements and billing sheets.")
-            excel_data = export_to_excel()
+            st.write("Contains all measurements and billing sheets for the selected project.")
+            excel_data = export_to_excel(project_id=(selected_project or {}).get('id'))
             if excel_data:
                 st.download_button("📥 Download Master Excel Report", data=excel_data, file_name="measurement_master.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
@@ -388,7 +535,7 @@ if st.session_state.role == "Manager":
             except Exception as e:
                 st.error(f"❌ PDF generation failed: {e}")
         else:
-            st.info("No records available.")
+            st.info("No records available for the selected project.")
 
 # --- MOBILE APP DOWNLOAD SECTION ---
 st.markdown("---")
