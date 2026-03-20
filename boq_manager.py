@@ -40,7 +40,7 @@ def get_latest_bill_for_project(project_id):
 def get_all_boqs():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT * FROM boqs")
+    c.execute("SELECT * FROM boqs ORDER BY CAST(boq_number AS INTEGER) ASC")
     columns = [description[0] for description in c.description]
     rows = c.fetchall()
     conn.close()

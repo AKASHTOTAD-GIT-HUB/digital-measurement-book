@@ -297,7 +297,7 @@ def get_boq_descriptions_for_project(project_id):
         SELECT boq_number, description 
         FROM boq_descriptions
         WHERE project_id = ? AND status = 'active'
-        ORDER BY boq_number ASC
+        ORDER BY CAST(boq_number AS INTEGER) ASC
     """, (project_id,))
     columns = [description[0] for description in c.description]
     rows = c.fetchall()
