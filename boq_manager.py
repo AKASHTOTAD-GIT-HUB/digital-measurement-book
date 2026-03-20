@@ -27,10 +27,20 @@ def get_or_create_boq(boq_number, project_name, project_id, contractor_name, sub
         return dict(zip(columns, row))
     return None
 
+def get_latest_bill_for_project_boq(project_id, boq_number):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT bill_no, bill_date, amount FROM billing WHERE project_id=? AND boq_number=? ORDER BY id DESC LIMIT 1", (project_id, str(boq_number)))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {'bill_no': row[0], 'bill_date': row[1], 'amount': row[2]}
+    return None
+
 def get_latest_bill_for_project(project_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT bill_no, bill_date, amount FROM billing WHERE project_id=? ORDER BY id DESC LIMIT 1", (project_id,))
+    c.execute("SELECT bill_no, bill_date, amount FROM billing WHERE project_id=? AND status='Approved' ORDER BY id DESC LIMIT 1", (project_id,))
     row = c.fetchone()
     conn.close()
     if row:
@@ -62,7 +72,7 @@ def get_boq(boq_number):
         return dict(zip(columns, row))
     return None
 
-def update_billing_and_boq(measurement_id, project_id, rate, amount, prev_bill_amount, prev_bill_date, prev_bill_number, total_payable):
+def update_billing_and_boq(measurement_id, project_id, rate, quantity, amount, prev_bill_amount, prev_bill_date, prev_bill_number, total_payable):
     """
     Updates the measurement record with billing info, AND updates the master BOQ
     record so the next bill pulls these newly updated 'previous' values.
@@ -78,21 +88,25 @@ def update_billing_and_boq(measurement_id, project_id, rate, amount, prev_bill_a
         WHERE id=?
     ''', (rate, amount, prev_bill_amount, prev_bill_date, prev_bill_number, total_payable, measurement_id))
     
-    # 2. Insert into billing
-    from datetime import date
-    today_str = date.today().isoformat()
-    new_prev_bill_number = f"BILL-{measurement_id}"
-    
-    c.execute('''
-        INSERT INTO billing (project_id, bill_no, bill_date, bill_name, amount, status)
-        VALUES (?, ?, ?, ?, ?, 'Approved')
-    ''', (project_id, new_prev_bill_number, today_str, f"Bill for Measurement {measurement_id}", total_payable))
-
     # 3. Get the boq_number for this measurement to update the BOQ master
     c.execute("SELECT boq_number FROM measurements WHERE id=?", (measurement_id,))
     res = c.fetchone()
+    boq_num = res[0] if res else "Unknown"
+    
+    # 2. Compute project-level Bill Number dynamically and Insert into billing
+    c.execute("SELECT COUNT(*) FROM billing WHERE project_id=?", (project_id,))
+    bill_count = c.fetchone()[0]
+    new_prev_bill_number = f"Bill {bill_count + 1}"
+    
+    from datetime import date
+    today_str = date.today().isoformat()
+    
+    c.execute('''
+        INSERT INTO billing (project_id, boq_number, bill_no, bill_date, bill_name, amount, rate, quantity, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Approved')
+    ''', (project_id, boq_num, new_prev_bill_number, today_str, f"Bill for Measurement {measurement_id}", total_payable, rate, quantity))
+
     if res:
-        boq_num = res[0]
         # Make the current bill the "previous bill" for the next measurement
         c.execute('''
             UPDATE boqs
@@ -102,3 +116,70 @@ def update_billing_and_boq(measurement_id, project_id, rate, amount, prev_bill_a
         
     conn.commit()
     conn.close()
+
+def create_project_bill(project_id, boq_number, rate, quantity, current_amount, total_payable):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Compute project-level Bill Number dynamically using MAX
+    c.execute("SELECT MAX(CAST(SUBSTR(bill_no, 6) AS INTEGER)) FROM billing WHERE project_id=? AND bill_no LIKE 'Bill %'", (project_id,))
+    max_val = c.fetchone()[0]
+    next_num = (max_val if max_val else 0) + 1
+    new_prev_bill_number = f"Bill {next_num}"
+    
+    from datetime import date
+    today_str = date.today().isoformat()
+    
+    c.execute('''
+        INSERT INTO billing (project_id, boq_number, bill_no, bill_date, bill_name, amount, rate, quantity, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Approved')
+    ''', (project_id, str(boq_number), new_prev_bill_number, today_str, f"Bill for BOQ {boq_number}", total_payable, rate, quantity))
+
+    # Update all unbilled measurements for this BOQ dynamically
+    c.execute('''
+        UPDATE measurements 
+        SET rate=?, amount=?, prev_bill_amount=?, prev_bill_date=?, prev_bill_number=?, total_payable=?, billed=1
+        WHERE project_id=? AND boq_number=? AND billed=0
+    ''', (rate, current_amount, total_payable - current_amount, today_str, new_prev_bill_number, total_payable, project_id, str(boq_number)))
+    
+    # Update master BOQ record
+    c.execute('''
+        UPDATE boqs
+        SET prev_bill_date=?, prev_bill_number=?, prev_bill_amount=?
+        WHERE boq_number=? AND project_id=?
+    ''', (today_str, new_prev_bill_number, total_payable, str(boq_number), project_id))
+    
+    conn.commit()
+    conn.close()
+
+def get_total_approved_amount_for_project(project_id):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT SUM(amount) FROM billing WHERE project_id=? AND status='Approved'", (project_id,))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res and res[0] else 0.0
+
+def get_unbilled_quantity_for_boq(project_id, boq_number):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        SELECT SUM(quantity)
+        FROM measurements
+        WHERE project_id = ? AND boq_number = ? AND status = 'Approved' AND billed = 0
+    ''', (project_id, str(boq_number)))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res and res[0] else 0.0
+
+def get_unbilled_quantity_dashboard(project_id, boq_number):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        SELECT SUM(quantity)
+        FROM measurements
+        WHERE project_id = ? AND boq_number = ? AND billed = 0
+    ''', (project_id, str(boq_number)))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res and res[0] else 0.0

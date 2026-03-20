@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 from database import init_db, insert_measurement, get_all_measurements, verify_tampering, add_boq_description, get_boq_descriptions_for_project, get_boq_description, edit_boq_description, delete_boq_description, soft_delete_measurement, add_project, edit_project, soft_delete_project, get_all_projects
-from boq_manager import get_or_create_boq, get_all_boqs, update_billing_and_boq, get_latest_bill_for_project
+from boq_manager import get_or_create_boq, get_all_boqs, update_billing_and_boq, get_latest_bill_for_project_boq, create_project_bill, get_total_approved_amount_for_project, get_latest_bill_for_project, get_unbilled_quantity_for_boq, get_unbilled_quantity_dashboard
 from excel_export import export_to_excel
 from report_generator import generate_pdf_report
 from streamlit_geolocation import streamlit_geolocation
@@ -428,72 +428,72 @@ if st.session_state.role == "Manager":
         # Exclude softly deleted measurements from billing possibilities entirely
         if selected_project:
             records = [r for r in records if r.get('is_deleted', 0) == 0 and r.get('project_id') == selected_project['id']]
-        else:
-            records = []
+            boq_descs = get_boq_descriptions_for_project(selected_project['id'])
+            boq_list = [d['boq_number'] for d in boq_descs]
             
-        if records:
-            record_options = {f"ID: {r['id']} - BOQ: {r['boq_number']} - {r['project_name']}": r for r in records}
-            selected_label = st.selectbox("Select Measurement Record to Review & Bill", list(record_options.keys()))
-            sel_rec = record_options[selected_label]
-            
-            st.markdown("---")
-            with st.container():
-                st.subheader("📋 Measurement Summary")
-                m_c1, m_c2, m_c3, m_c4, m_c5 = st.columns(5)
-                m_c1.write(f"**BOQ No:** {sel_rec['boq_number']}")
-                m_c2.write(f"**Description:** {sel_rec['description']}")
-                m_c3.write(f"**Status:** {sel_rec['status']}")
-                m_c4.write(f"**Measurement Date:** {sel_rec['date_measurement']}")
-                m_c5.info(f"**Quantity:** {sel_rec['quantity']}")
+            if boq_list:
+                selected_boq = st.selectbox("Select BOQ to Bill", boq_list, index=None, placeholder="Select BOQ Number")
                 
-            st.markdown("---")
-            
-            with st.form("billing_form"):
-                st.subheader("📜 Bill Calculation")
-                
-                # Auto load from LAST BILL for the project!
-                last_bill = get_latest_bill_for_project((selected_project or {}).get('id'))
-                if last_bill and isinstance(last_bill, dict):
-                    def_prev_amt = last_bill.get('amount', 0.0)
-                    def_prev_no = last_bill.get('bill_no', 'N/A')
+                if not selected_boq:
+                    st.warning("⚠️ Please select BOQ Number")
                 else:
-                    def_prev_amt = 0.0
-                    def_prev_no = "N/A"
-                
-                # Auto populated read-only fields for current bill
-                current_bill_date = datetime.datetime.today().strftime("%d-%m-%Y")
-                col_c1, col_c2 = st.columns(2)
-                col_c1.text_input("BOQ Number Selected", sel_rec['boq_number'], disabled=True)
-                col_c2.text_input("Current Bill Date", current_bill_date, disabled=True)
-                
-                col_b1, col_b2, col_b3 = st.columns(3)
-                with col_b1:
-                    rate = st.number_input("Rate (₹)", min_value=0.0, format="%.2f", value=sel_rec['rate'] or 0.0)
-                with col_b2:
-                    amt = sel_rec['quantity'] * rate
-                    st.success(f"**Current Bill Amount = ₹ {amt:.2f}**")
-                with col_b3:
-                    st.info(f"**Previous Bill Amount = ₹ {float(def_prev_amt):.2f}**")
+                    unbilled_qty = get_unbilled_quantity_dashboard(selected_project['id'], selected_boq)
                     
-                tot = float(def_prev_amt) + amt
-                st.warning(f"**Total Payable Amount: ₹ {tot:.2f}**")
-                
-                is_approved = (sel_rec['status'] == "Approved")
-                if is_approved:
-                    st.success("✅ This measurement has already been Approved and is Locked.")
+                    st.markdown("---")
                     
-                # The submit button MUST be unconditionally rendered inside an st.form!
-                update_btn = st.form_submit_button("Approve Bill", disabled=is_approved)
-                
-                if update_btn and not is_approved:
-                    try:
-                        update_billing_and_boq(sel_rec['id'], selected_project['id'], rate, amt, float(def_prev_amt), current_bill_date, def_prev_no, tot)
-                        st.success("Billing details updated, Bill Approved, and Measurement successfully Locked!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to approve bill: {e}")
+                    # Removing st.form to allow instant reactivity of Rate calculation
+                    with st.container():
+                        st.subheader("📋 Previous Bill Details")
+                        last_bill = get_latest_bill_for_project(selected_project['id'])
+                        
+                        if last_bill and isinstance(last_bill, dict):
+                            prev_bill_no = last_bill.get('bill_no', 'N/A')
+                            prev_bill_date = last_bill.get('bill_date', 'N/A')
+                            prev_bill_amt = last_bill.get('amount', 0.0)
+                        else:
+                            prev_bill_no = "N/A"
+                            prev_bill_date = "N/A"
+                            prev_bill_amt = "NA"
+                            
+                        col_p1, col_p2, col_p3 = st.columns(3)
+                        col_p1.text_input("Previous Bill Number", value=prev_bill_no, disabled=True)
+                        col_p2.text_input("Previous Bill Date", value=prev_bill_date, disabled=True)
+                        col_p3.text_input("Previous Bill Amount", value=str(prev_bill_amt), disabled=True)
+    
+                        st.markdown("---")
+                        st.subheader("📜 Current Bill Calculation")
+                        
+                        st.info(f"**Project:** {selected_project['project_name']} | **BOQ Number:** {selected_boq}")
+                        st.write(f"**Quantity from Dashboard = {unbilled_qty:.3f}**")
+                        
+                        rate = st.number_input("Rate (₹ per unit)", min_value=0.0, format="%.2f", step=1.0)
+                        current_bill_amount = unbilled_qty * rate
+                        
+                        st.success(f"**Current Bill Amount = ₹ {current_bill_amount:.2f}**")
+                        
+                        tot_approved = get_total_approved_amount_for_project(selected_project['id'])
+                        st.info(f"**Total Approved Amount (Till Now) = ₹ {tot_approved:.2f}**")
+                        
+                        safe_prev_amt = 0.0 if prev_bill_amt == "NA" else float(prev_bill_amt)
+                        total_payable = safe_prev_amt + current_bill_amount
+                        
+                        disable_approve = unbilled_qty <= 0
+                        if disable_approve:
+                            st.warning("⚠️ No quantity available for this BOQ")
+                            
+                        update_btn = st.button("Approve Bill", disabled=disable_approve, type="primary")
+                        
+                        if update_btn and not disable_approve:
+                            try:
+                                create_project_bill(selected_project['id'], selected_boq, rate, unbilled_qty, current_bill_amount, total_payable)
+                                st.success("✅ Bill successfully generated, locked, and appended to the Project Billing ledger!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Failed to approve bill: {e}")
+            else:
+                st.info("No BOQs configured for the selected project.")
         else:
-            st.info("No records available to bill for the selected project.")
+            st.info("Please select an active project to calculate billing.")
 
 # --- TAB: DOWNLOAD REPORT (Manager Only) ---
 if st.session_state.role == "Manager":

@@ -103,14 +103,27 @@ def init_db():
         CREATE TABLE IF NOT EXISTS billing (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER,
+            boq_number TEXT,
             bill_no TEXT,
             bill_date TEXT,
             bill_name TEXT,
             amount REAL,
+            rate REAL,
+            quantity REAL,
             status TEXT DEFAULT 'Approved',
             FOREIGN KEY(project_id) REFERENCES projects(id)
         )
     ''')
+    
+    # Billing schema migration
+    c.execute("PRAGMA table_info(billing)")
+    billing_cols = [col[1] for col in c.fetchall()]
+    if billing_cols and 'boq_number' not in billing_cols:
+        c.execute("ALTER TABLE billing ADD COLUMN boq_number TEXT")
+    if billing_cols and 'rate' not in billing_cols:
+        c.execute("ALTER TABLE billing ADD COLUMN rate REAL DEFAULT 0")
+    if billing_cols and 'quantity' not in billing_cols:
+        c.execute("ALTER TABLE billing ADD COLUMN quantity REAL DEFAULT 0")
     
     # Ensure project_id column exists on old DBs
     for table in ['measurements', 'boqs']:
@@ -118,6 +131,12 @@ def init_db():
         columns = [col[1] for col in c.fetchall()]
         if 'project_id' not in columns:
             c.execute(f"ALTER TABLE {table} ADD COLUMN project_id INTEGER")
+            
+    # Schema migration for new billed toggle on measurements
+    c.execute("PRAGMA table_info(measurements)")
+    meas_cols = [col[1] for col in c.fetchall()]
+    if meas_cols and 'billed' not in meas_cols:
+        c.execute("ALTER TABLE measurements ADD COLUMN billed INTEGER DEFAULT 0")
             
     # Data migration
     from datetime import datetime
