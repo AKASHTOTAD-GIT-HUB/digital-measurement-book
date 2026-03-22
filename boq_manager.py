@@ -117,7 +117,7 @@ def update_billing_and_boq(measurement_id, project_id, rate, quantity, amount, p
     conn.commit()
     conn.close()
 
-def create_project_bill(project_id, boq_number, rate, quantity, current_amount, total_payable):
+def create_project_bill_by_id(project_id, boq_number, rate, quantity, current_amount, total_payable, measurement_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
@@ -133,14 +133,14 @@ def create_project_bill(project_id, boq_number, rate, quantity, current_amount, 
     c.execute('''
         INSERT INTO billing (project_id, boq_number, bill_no, bill_date, bill_name, amount, rate, quantity, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Approved')
-    ''', (project_id, str(boq_number), new_prev_bill_number, today_str, f"Bill for BOQ {boq_number}", total_payable, rate, quantity))
+    ''', (project_id, str(boq_number), new_prev_bill_number, today_str, f"Bill for BOQ {boq_number} (ID {measurement_id})", total_payable, rate, quantity))
 
-    # Update all unbilled measurements for this BOQ dynamically
+    # Update the single selected measurement to billed
     c.execute('''
         UPDATE measurements 
-        SET rate=?, amount=?, prev_bill_amount=?, prev_bill_date=?, prev_bill_number=?, total_payable=?, billed=1
-        WHERE project_id=? AND boq_number=? AND billed=0
-    ''', (rate, current_amount, total_payable - current_amount, today_str, new_prev_bill_number, total_payable, project_id, str(boq_number)))
+        SET rate=?, amount=?, prev_bill_amount=?, prev_bill_date=?, prev_bill_number=?, total_payable=?, billed=1, status='billed'
+        WHERE id=? AND project_id=? AND billed=0
+    ''', (rate, current_amount, total_payable - current_amount, today_str, new_prev_bill_number, total_payable, measurement_id, project_id))
     
     # Update master BOQ record
     c.execute('''
@@ -172,14 +172,15 @@ def get_unbilled_quantity_for_boq(project_id, boq_number):
     conn.close()
     return res[0] if res and res[0] else 0.0
 
-def get_unbilled_quantity_dashboard(project_id, boq_number):
+def get_unbilled_measurements_for_project_id_selection(project_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''
-        SELECT SUM(quantity)
+        SELECT id, boq_number, quantity
         FROM measurements
-        WHERE project_id = ? AND boq_number = ? AND billed = 0
-    ''', (project_id, str(boq_number)))
-    res = c.fetchone()
+        WHERE project_id = ? AND status IN ('Pending', 'Approved') AND is_deleted = 0 AND billed = 0
+        ORDER BY id ASC
+    ''', (project_id,))
+    rows = c.fetchall()
     conn.close()
-    return res[0] if res and res[0] else 0.0
+    return [{'id': r[0], 'boq_number': r[1], 'quantity': r[2] or 0.0} for r in rows]

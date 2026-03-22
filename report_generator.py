@@ -102,10 +102,10 @@ def generate_pdf_report(measurement_id):
     # 📊 TABLE:
     elements.append(Paragraph("<b>Billing Description</b>", heading_style))
     meas_data = [
-        ["BOQ Number", "Quantity", "Rate", "Amount"],
+        ["Selected BOQ ID", "Quantity (from that BOQ only)", "Rate", "Current Bill Amount"],
         [str(record['boq_number']), f"{pdf_qty:.3f}", f"₹ {float(pdf_rate):.2f}", f"₹ {float(pdf_curr_bill):.2f}"]
     ]
-    meas_table = Table(meas_data, colWidths=[150, 80, 80, 100])
+    meas_table = Table(meas_data, colWidths=[110, 160, 70, 110])
     meas_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4a4a4a")),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),

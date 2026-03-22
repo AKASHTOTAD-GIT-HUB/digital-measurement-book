@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 from database import init_db, insert_measurement, get_all_measurements, verify_tampering, add_boq_description, get_boq_descriptions_for_project, get_boq_description, edit_boq_description, delete_boq_description, soft_delete_measurement, add_project, edit_project, soft_delete_project, get_all_projects
-from boq_manager import get_or_create_boq, get_all_boqs, update_billing_and_boq, get_latest_bill_for_project_boq, create_project_bill, get_total_approved_amount_for_project, get_latest_bill_for_project, get_unbilled_quantity_for_boq, get_unbilled_quantity_dashboard
+from boq_manager import get_or_create_boq, get_all_boqs, update_billing_and_boq, get_latest_bill_for_project_boq, create_project_bill_by_id, get_total_approved_amount_for_project, get_latest_bill_for_project, get_unbilled_quantity_for_boq, get_unbilled_measurements_for_project_id_selection
 from excel_export import export_to_excel
 from report_generator import generate_pdf_report
 from streamlit_geolocation import streamlit_geolocation
@@ -388,12 +388,15 @@ with dash_tab:
         
         # Apply stylings using pandas style to handle strikethrough for UI natively
         def style_rows(row):
-            if row['status'] == 'Approved':
+            status_val = str(row.get('status', '')).capitalize()
+            if status_val in ['Approved', 'Billed']:
                 return ['background-color: #d4edda; color: #155724; font-weight: bold'] * len(row)
-            elif row['is_deleted'] == 1 or row['status'] == 'Deleted':
+            elif row['is_deleted'] == 1 or status_val == 'Deleted':
                 return ['text-decoration: line-through; color: #721c24; background-color: #f8d7da'] * len(row)
             else:
                 return [''] * len(row)
+        
+        display_df['status'] = display_df['status'].str.capitalize()
 
         st.dataframe(display_df.style.apply(style_rows, axis=1), use_container_width=True, hide_index=True)
         
@@ -428,16 +431,19 @@ if st.session_state.role == "Manager":
         # Exclude softly deleted measurements from billing possibilities entirely
         if selected_project:
             records = [r for r in records if r.get('is_deleted', 0) == 0 and r.get('project_id') == selected_project['id']]
-            boq_descs = get_boq_descriptions_for_project(selected_project['id'])
-            boq_list = [d['boq_number'] for d in boq_descs]
+            unbilled_meas = get_unbilled_measurements_for_project_id_selection(selected_project['id'])
             
-            if boq_list:
-                selected_boq = st.selectbox("Select BOQ to Bill", boq_list, index=None, placeholder="Select BOQ Number")
+            if unbilled_meas:
+                meas_options = {f"{m['id']} - BOQ {m['boq_number']}": m for m in unbilled_meas}
+                selected_option = st.selectbox("Select Measurement ID to Bill", list(meas_options.keys()), index=None, placeholder="Select Measurement ID")
                 
-                if not selected_boq:
-                    st.warning("⚠️ Please select BOQ Number")
+                if not selected_option:
+                    st.warning("⚠️ Please select Measurement ID")
                 else:
-                    unbilled_qty = get_unbilled_quantity_dashboard(selected_project['id'], selected_boq)
+                    selected_m = meas_options[selected_option]
+                    selected_id = selected_m['id']
+                    selected_boq = selected_m['boq_number']
+                    unbilled_qty = selected_m['quantity']
                     
                     st.markdown("---")
                     
@@ -463,13 +469,13 @@ if st.session_state.role == "Manager":
                         st.markdown("---")
                         st.subheader("📜 Current Bill Calculation")
                         
-                        st.info(f"**Project:** {selected_project['project_name']} | **BOQ Number:** {selected_boq}")
-                        st.write(f"**Quantity from Dashboard = {unbilled_qty:.3f}**")
+                        st.info(f"**Selected ID:** {selected_id}\n\n**Corresponding BOQ Number:** {selected_boq}")
+                        st.write(f"**Quantity from that ID:** {unbilled_qty:.3f}")
                         
                         rate = st.number_input("Rate (₹ per unit)", min_value=0.0, format="%.2f", step=1.0)
                         current_bill_amount = unbilled_qty * rate
                         
-                        st.success(f"**Current Bill Amount = ₹ {current_bill_amount:.2f}**")
+                        st.success(f"**Calculated Current Bill = ₹ {current_bill_amount:.2f}**")
                         
                         tot_approved = get_total_approved_amount_for_project(selected_project['id'])
                         st.info(f"**Total Approved Amount (Till Now) = ₹ {tot_approved:.2f}**")
@@ -479,19 +485,19 @@ if st.session_state.role == "Manager":
                         
                         disable_approve = unbilled_qty <= 0
                         if disable_approve:
-                            st.warning("⚠️ No quantity available for this BOQ")
+                            st.warning("⚠️ No measurements found for this BOQ")
                             
                         update_btn = st.button("Approve Bill", disabled=disable_approve, type="primary")
                         
                         if update_btn and not disable_approve:
                             try:
-                                create_project_bill(selected_project['id'], selected_boq, rate, unbilled_qty, current_bill_amount, total_payable)
+                                create_project_bill_by_id(selected_project['id'], selected_boq, rate, unbilled_qty, current_bill_amount, total_payable, selected_id)
                                 st.success("✅ Bill successfully generated, locked, and appended to the Project Billing ledger!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ Failed to approve bill: {e}")
             else:
-                st.info("No BOQs configured for the selected project.")
+                st.info("No unbilled measurements found for the selected project.")
         else:
             st.info("Please select an active project to calculate billing.")
 
