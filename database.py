@@ -132,11 +132,15 @@ def init_db():
         if 'project_id' not in columns:
             c.execute(f"ALTER TABLE {table} ADD COLUMN project_id INTEGER")
             
-    # Schema migration for new billed toggle on measurements
+    # Schema migration for new fields on measurements
     c.execute("PRAGMA table_info(measurements)")
     meas_cols = [col[1] for col in c.fetchall()]
     if meas_cols and 'billed' not in meas_cols:
         c.execute("ALTER TABLE measurements ADD COLUMN billed INTEGER DEFAULT 0")
+    if meas_cols and 'gps_link' not in meas_cols:
+        c.execute("ALTER TABLE measurements ADD COLUMN gps_link TEXT")
+    if meas_cols and 'image_path' not in meas_cols:
+        c.execute("ALTER TABLE measurements ADD COLUMN image_path TEXT")
             
     # Data migration
     from datetime import datetime
@@ -208,7 +212,7 @@ def generate_hash(boq_number, project_name, description, length, breadth, depth_
 
 def insert_measurement(boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement, 
                        description, number_items, length, breadth, depth_height, quantity, 
-                       remarks, gps_coordinates, selfie_image, site_photo_image, timestamp):
+                       remarks, gps_coordinates, selfie_image, site_photo_image, timestamp, gps_link, image_path):
     
     hash_value = generate_hash(boq_number, project_name, description, length, breadth, depth_height, quantity, gps_coordinates, timestamp)
     
@@ -218,11 +222,11 @@ def insert_measurement(boq_number, project_name, project_id, contractor_name, su
         INSERT INTO measurements (
             boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement,
             description, number_items, length, breadth, depth_height, quantity,
-            remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, image_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement,
           description, number_items, length, breadth, depth_height, quantity,
-          remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp))
+          remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, image_path))
     conn.commit()
     conn.close()
     return hash_value

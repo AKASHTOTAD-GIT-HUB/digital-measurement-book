@@ -143,8 +143,14 @@ def generate_pdf_report(measurement_id):
     
     # Site Verification and Blockchain
     elements.append(Paragraph("<b>Site Verification & Blockchain Record</b>", heading_style))
+    gps_link = record.get('gps_link', '')
+    if gps_link:
+        gps_val = Paragraph(f"<link href='{gps_link}' color='blue'>{record['gps_coordinates']} (Click to View Map)</link>", normal_style)
+    else:
+        gps_val = record['gps_coordinates']
+        
     veri_data = [
-        ["GPS Coordinates:", record['gps_coordinates']],
+        ["GPS Coordinates:", gps_val],
         ["Timestamp:", record['timestamp']],
         ["Blockchain Hash:", record['hash_value']],
         ["Tamper Check:", "Valid" if is_valid else "⚠ TAMPERED"]

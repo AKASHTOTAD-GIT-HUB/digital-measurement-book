@@ -11,6 +11,27 @@ st.set_page_config(page_title="Blockchain Digital Measurement Book", layout="wid
 
 # Initialize DB on first load
 if 'db_initialized' not in st.session_state:
+    # --- STANDALONE IMAGE VIEWER ROUTING ---
+    import os
+    if "view_image_id" in st.query_params:
+        meas_id = st.query_params.get("view_image_id")
+        st.header(f"Uploaded Image (Measurement ID: {meas_id})")
+        import sqlite3
+        conn = sqlite3.connect('database.db')
+        c = conn.cursor()
+        c.execute("SELECT image_path FROM measurements WHERE id=?", (meas_id,))
+        res = c.fetchone()
+        conn.close()
+        if res and res[0] and os.path.exists(res[0]):
+            st.image(res[0])
+        else:
+            st.error("Image file not found on disk.")
+        if st.button("Back to Dashboard"):
+            st.query_params.clear()
+            st.rerun()
+        st.stop()
+
+    # --- INIT DB ---
     init_db()
     st.session_state.db_initialized = True
 
@@ -362,10 +383,20 @@ if st.session_state.role == "Site Engineer":
                         selfie_bytes = selfie_photo.getvalue()
                         site_bytes = site_photo.getvalue()
                         
+                        import os
+                        import time
+                        if not os.path.exists("uploads"):
+                            os.makedirs("uploads")
+                        image_path = f"uploads/site_photo_{p_id}_{int(time.time())}.jpg"
+                        with open(image_path, "wb") as f:
+                            f.write(site_bytes)
+                            
+                        gps_link = f"https://www.google.com/maps?q={gps_coords}" if gps_coords else ""
+                        
                         h_val = insert_measurement(
                             str(boq_number), p_name, p_id, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date), str(date_measurement),
                             description, num_items, length, breadth, depth_height, calc_vol,
-                            remarks, gps_coords, selfie_bytes, site_bytes, ts
+                            remarks, gps_coords, selfie_bytes, site_bytes, ts, gps_link, image_path
                         )
                         st.success("✅ Measurement recorded securely with blockchain-style hash!")
                         st.info(f"**Generated Tamper-Proof Hash:** {h_val}")
@@ -384,7 +415,10 @@ with dash_tab:
         
     if records:
         df = pd.DataFrame(records)
-        display_df = df[['id', 'boq_number', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'status', 'is_deleted']].copy()
+        display_df = df[['id', 'boq_number', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'gps_link', 'image_path', 'status', 'is_deleted']].copy()
+        display_df.rename(columns={'gps_link': 'Location'}, inplace=True)
+        display_df['Image'] = display_df['id'].apply(lambda x: f"/?view_image_id={x}")
+        display_df.drop(columns=['image_path'], inplace=True, errors='ignore')
         
         # Apply stylings using pandas style to handle strikethrough for UI natively
         def style_rows(row):
@@ -398,7 +432,15 @@ with dash_tab:
         
         display_df['status'] = display_df['status'].str.capitalize()
 
-        st.dataframe(display_df.style.apply(style_rows, axis=1), use_container_width=True, hide_index=True)
+        st.dataframe(
+            display_df.style.apply(style_rows, axis=1), 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Location": st.column_config.LinkColumn("Location", display_text="View Location"),
+                "Image": st.column_config.LinkColumn("Image", display_text="View Image")
+            }
+        )
         
         # Add Soft Delete UI for Site Engineers
         if st.session_state.role == "Site Engineer":
