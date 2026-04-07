@@ -15,11 +15,13 @@ if 'db_initialized' not in st.session_state:
     import os
     if "view_image_id" in st.query_params:
         meas_id = st.query_params.get("view_image_id")
+        img_type = st.query_params.get("type", "site")
         st.header(f"Uploaded Image (Measurement ID: {meas_id})")
         import sqlite3
         conn = sqlite3.connect('database.db')
         c = conn.cursor()
-        c.execute("SELECT image_path FROM measurements WHERE id=?", (meas_id,))
+        col = 'engineer_image' if img_type == 'engineer' else 'site_image'
+        c.execute(f"SELECT {col} FROM measurements WHERE id=?", (meas_id,))
         res = c.fetchone()
         conn.close()
         if res and res[0] and os.path.exists(res[0]):
@@ -127,11 +129,13 @@ if st.session_state.role == "Manager":
                 with t1:
                     with st.form("add_boq_form"):
                         st.subheader("➕ Add New BOQ Description")
-                        col1, col2 = st.columns([1, 4])
+                        col1, col2, col3 = st.columns([1, 2, 3])
                         with col1:
-                            new_boq_num = st.text_input("BOQ Number", placeholder="e.g. 1 or 1.1")
+                            new_boq_num = st.text_input("BOQ Number", placeholder="e.g. 1")
                         with col2:
-                            new_desc = st.text_input("Description of Work", placeholder="e.g. Excavation for foundation")
+                            new_work_name = st.text_input("Work Name", placeholder="e.g. Earthwork")
+                        with col3:
+                            new_desc = st.text_input("Description of Work", placeholder="e.g. Excavation")
                             
                         submit_boq = st.form_submit_button("Save BOQ Description")
                         
@@ -141,7 +145,7 @@ if st.session_state.role == "Manager":
                             elif not new_desc.strip():
                                 st.error("Description of Work cannot be empty.")
                             else:
-                                success, msg = add_boq_description(p_id, new_boq_num.strip(), new_desc.strip())
+                                success, msg = add_boq_description(p_id, new_boq_num.strip(), new_work_name.strip(), new_desc.strip())
                                 if success:
                                     st.success(f"Successfully added BOQ #{new_boq_num}: {new_desc}")
                                     st.rerun()
@@ -152,16 +156,17 @@ if st.session_state.role == "Manager":
                     with st.form("edit_boq_form"):
                         st.subheader("✏️ Edit Existing BOQ Description")
                         if boq_descs:
-                            boq_options = {d['boq_number']: d['description'] for d in boq_descs}
+                            boq_options = {str(d['boq_number']): d for d in boq_descs}
                             edit_num = st.selectbox("Select BOQ to Edit", list(boq_options.keys()))
-                            edit_desc = st.text_input("New Description of Work", value=boq_options.get(edit_num, ""))
+                            edit_work_name = st.text_input("New Work Name", value=boq_options[edit_num].get("work_name", ""))
+                            edit_desc = st.text_input("New Description of Work", value=boq_options[edit_num]["description"])
                             submit_edit = st.form_submit_button("Update BOQ")
                             
                             if submit_edit:
                                 if not edit_desc.strip():
                                     st.error("Description cannot be empty.")
                                 else:
-                                    if edit_boq_description(p_id, edit_num, edit_desc.strip()):
+                                    if edit_boq_description(p_id, edit_num, edit_work_name.strip(), edit_desc.strip()):
                                         st.success("Successfully updated BOQ Description!")
                                         st.rerun()
                                     else:
@@ -387,16 +392,19 @@ if st.session_state.role == "Site Engineer":
                         import time
                         if not os.path.exists("uploads"):
                             os.makedirs("uploads")
-                        image_path = f"uploads/site_photo_{p_id}_{int(time.time())}.jpg"
-                        with open(image_path, "wb") as f:
+                        site_image_path = f"uploads/site_photo_{p_id}_{int(time.time())}.jpg"
+                        engineer_image_path = f"uploads/engineer_photo_{p_id}_{int(time.time())}.jpg"
+                        with open(site_image_path, "wb") as f:
                             f.write(site_bytes)
+                        with open(engineer_image_path, "wb") as f:
+                            f.write(selfie_bytes)
                             
                         gps_link = f"https://www.google.com/maps?q={gps_coords}" if gps_coords else ""
                         
                         h_val = insert_measurement(
                             str(boq_number), p_name, p_id, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date), str(date_measurement),
                             description, num_items, length, breadth, depth_height, calc_vol,
-                            remarks, gps_coords, selfie_bytes, site_bytes, ts, gps_link, image_path
+                            remarks, gps_coords, selfie_bytes, site_bytes, ts, gps_link, engineer_image_path, site_image_path
                         )
                         st.success("✅ Measurement recorded securely with blockchain-style hash!")
                         st.info(f"**Generated Tamper-Proof Hash:** {h_val}")
@@ -415,10 +423,11 @@ with dash_tab:
         
     if records:
         df = pd.DataFrame(records)
-        display_df = df[['id', 'boq_number', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'gps_link', 'image_path', 'status', 'is_deleted']].copy()
+        display_df = df[['id', 'boq_number', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'gps_link', 'engineer_image', 'site_image', 'status', 'is_deleted']].copy()
         display_df.rename(columns={'gps_link': 'Location'}, inplace=True)
-        display_df['Image'] = display_df['id'].apply(lambda x: f"/?view_image_id={x}")
-        display_df.drop(columns=['image_path'], inplace=True, errors='ignore')
+        display_df['Engineer Image'] = display_df['id'].apply(lambda x: f"/?view_image_id={x}&type=engineer")
+        display_df['Site Work Image'] = display_df['id'].apply(lambda x: f"/?view_image_id={x}&type=site")
+        display_df.drop(columns=['engineer_image', 'site_image'], inplace=True, errors='ignore')
         
         # Apply stylings using pandas style to handle strikethrough for UI natively
         def style_rows(row):
@@ -438,7 +447,8 @@ with dash_tab:
             hide_index=True,
             column_config={
                 "Location": st.column_config.LinkColumn("Location", display_text="View Location"),
-                "Image": st.column_config.LinkColumn("Image", display_text="View Image")
+                "Engineer Image": st.column_config.LinkColumn("Engineer Image", display_text="View Image"),
+                "Site Work Image": st.column_config.LinkColumn("Site Work Image", display_text="View Image")
             }
         )
         

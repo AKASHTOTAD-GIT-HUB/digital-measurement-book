@@ -139,8 +139,10 @@ def init_db():
         c.execute("ALTER TABLE measurements ADD COLUMN billed INTEGER DEFAULT 0")
     if meas_cols and 'gps_link' not in meas_cols:
         c.execute("ALTER TABLE measurements ADD COLUMN gps_link TEXT")
-    if meas_cols and 'image_path' not in meas_cols:
-        c.execute("ALTER TABLE measurements ADD COLUMN image_path TEXT")
+    if meas_cols and 'engineer_image' not in meas_cols:
+        c.execute("ALTER TABLE measurements ADD COLUMN engineer_image TEXT")
+    if meas_cols and 'site_image' not in meas_cols:
+        c.execute("ALTER TABLE measurements ADD COLUMN site_image TEXT")
             
     # Data migration
     from datetime import datetime
@@ -186,6 +188,8 @@ def init_db():
         boq_cols_new = [col[1] for col in c.fetchall()]
         if 'status' not in boq_cols_new:
             c.execute("ALTER TABLE boq_descriptions ADD COLUMN status TEXT DEFAULT 'active'")
+        if 'work_name' not in boq_cols_new:
+            c.execute("ALTER TABLE boq_descriptions ADD COLUMN work_name TEXT")
             
     except Exception as e:
         print(f"Migration error: {e}")
@@ -212,7 +216,7 @@ def generate_hash(boq_number, project_name, description, length, breadth, depth_
 
 def insert_measurement(boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement, 
                        description, number_items, length, breadth, depth_height, quantity, 
-                       remarks, gps_coordinates, selfie_image, site_photo_image, timestamp, gps_link, image_path):
+                       remarks, gps_coordinates, selfie_image, site_photo_image, timestamp, gps_link, engineer_image, site_image):
     
     hash_value = generate_hash(boq_number, project_name, description, length, breadth, depth_height, quantity, gps_coordinates, timestamp)
     
@@ -222,16 +226,16 @@ def insert_measurement(boq_number, project_name, project_id, contractor_name, su
         INSERT INTO measurements (
             boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement,
             description, number_items, length, breadth, depth_height, quantity,
-            remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, image_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, engineer_image, site_image
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement,
           description, number_items, length, breadth, depth_height, quantity,
-          remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, image_path))
+          remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, engineer_image, site_image))
     conn.commit()
     conn.close()
     return hash_value
 
-def add_boq_description(project_id, boq_number, description):
+def add_boq_description(project_id, boq_number, work_name, description):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     # Check if BOQ number already exists for this project
@@ -242,9 +246,9 @@ def add_boq_description(project_id, boq_number, description):
         
     try:
         c.execute('''
-            INSERT INTO boq_descriptions (project_id, boq_number, description)
-            VALUES (?, ?, ?)
-        ''', (project_id, str(boq_number), description))
+            INSERT INTO boq_descriptions (project_id, boq_number, work_name, description)
+            VALUES (?, ?, ?, ?)
+        ''', (project_id, str(boq_number), work_name, description))
         conn.commit()
         success = True
         msg = "Success"
@@ -254,15 +258,15 @@ def add_boq_description(project_id, boq_number, description):
     conn.close()
     return success, msg
 
-def edit_boq_description(project_id, boq_number, new_description):
+def edit_boq_description(project_id, boq_number, new_work_name, new_description):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     try:
         c.execute('''
             UPDATE boq_descriptions
-            SET description = ?
+            SET work_name = ?, description = ?
             WHERE project_id = ? AND boq_number = ?
-        ''', (new_description, project_id, str(boq_number)))
+        ''', (new_work_name, new_description, project_id, str(boq_number)))
         conn.commit()
         success = True
     except Exception:
@@ -296,7 +300,7 @@ def get_boq_description(project_id, boq_number):
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
     c.execute("""
-        SELECT description 
+        SELECT work_name, description 
         FROM boq_descriptions
         WHERE project_id = ?
         AND boq_number = ?
@@ -309,15 +313,21 @@ def get_boq_description(project_id, boq_number):
     conn.close()
 
     if result:
-        return result[0]
-    else:
-        return "No Description Available"
+        work_name = result[0] if result[0] else ""
+        desc = result[1] if result[1] else ""
+        if work_name and desc:
+            return f"Work Name: {work_name}\nDescription: {desc}"
+        elif work_name:
+            return f"Work Name: {work_name}"
+        elif desc:
+            return desc
+    return "No Description Available"
 
 def get_boq_descriptions_for_project(project_id):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT boq_number, description 
+        SELECT boq_number, work_name, description 
         FROM boq_descriptions
         WHERE project_id = ? AND status = 'active'
         ORDER BY CAST(boq_number AS INTEGER) ASC
