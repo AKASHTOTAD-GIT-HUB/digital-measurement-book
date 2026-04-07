@@ -129,12 +129,10 @@ if st.session_state.role == "Manager":
                 with t1:
                     with st.form("add_boq_form"):
                         st.subheader("➕ Add New BOQ Description")
-                        col1, col2, col3 = st.columns([1, 2, 3])
+                        col1, col2 = st.columns([1, 4])
                         with col1:
                             new_boq_num = st.text_input("BOQ Number", placeholder="e.g. 1")
                         with col2:
-                            new_work_name = st.text_input("Work Name", placeholder="e.g. Earthwork")
-                        with col3:
                             new_desc = st.text_input("Description of Work", placeholder="e.g. Excavation")
                             
                         submit_boq = st.form_submit_button("Save BOQ Description")
@@ -145,7 +143,7 @@ if st.session_state.role == "Manager":
                             elif not new_desc.strip():
                                 st.error("Description of Work cannot be empty.")
                             else:
-                                success, msg = add_boq_description(p_id, new_boq_num.strip(), new_work_name.strip(), new_desc.strip())
+                                success, msg = add_boq_description(p_id, new_boq_num.strip(), new_desc.strip())
                                 if success:
                                     st.success(f"Successfully added BOQ #{new_boq_num}: {new_desc}")
                                     st.rerun()
@@ -158,7 +156,6 @@ if st.session_state.role == "Manager":
                         if boq_descs:
                             boq_options = {str(d['boq_number']): d for d in boq_descs}
                             edit_num = st.selectbox("Select BOQ to Edit", list(boq_options.keys()))
-                            edit_work_name = st.text_input("New Work Name", value=boq_options[edit_num].get("work_name", ""))
                             edit_desc = st.text_input("New Description of Work", value=boq_options[edit_num]["description"])
                             submit_edit = st.form_submit_button("Update BOQ")
                             
@@ -166,7 +163,7 @@ if st.session_state.role == "Manager":
                                 if not edit_desc.strip():
                                     st.error("Description cannot be empty.")
                                 else:
-                                    if edit_boq_description(p_id, edit_num, edit_work_name.strip(), edit_desc.strip()):
+                                    if edit_boq_description(p_id, edit_num, edit_desc.strip()):
                                         st.success("Successfully updated BOQ Description!")
                                         st.rerun()
                                     else:
@@ -289,13 +286,16 @@ if st.session_state.role == "Site Engineer":
                     
                     selected_boq = st.selectbox("BOQ Number", boq_list, key="selected_boq")
                     boq_number = str(selected_boq) if selected_boq is not None else None
+                    work_name_input = st.text_input("Work Name", placeholder="e.g. Earthwork")
                 else:
                     st.warning("No BOQs configured for this project. Manager must add BOQs first.")
                     boq_number = None
+                    work_name_input = ""
             else:
                 st.session_state.selected_project_id = None
                 boq_list = []
                 boq_number = None
+                work_name_input = ""
 
         with col2:
             if boq_number:
@@ -404,7 +404,7 @@ if st.session_state.role == "Site Engineer":
                         h_val = insert_measurement(
                             str(boq_number), p_name, p_id, contractor_name, sub_contractor_name, str(date_commencement), str(finish_date), str(date_measurement),
                             description, num_items, length, breadth, depth_height, calc_vol,
-                            remarks, gps_coords, selfie_bytes, site_bytes, ts, gps_link, engineer_image_path, site_image_path
+                            remarks, gps_coords, selfie_bytes, site_bytes, ts, gps_link, engineer_image_path, site_image_path, work_name_input
                         )
                         st.success("✅ Measurement recorded securely with blockchain-style hash!")
                         st.info(f"**Generated Tamper-Proof Hash:** {h_val}")
@@ -423,7 +423,7 @@ with dash_tab:
         
     if records:
         df = pd.DataFrame(records)
-        display_df = df[['id', 'boq_number', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'gps_link', 'engineer_image', 'site_image', 'status', 'is_deleted']].copy()
+        display_df = df[['id', 'boq_number', 'work_name', 'description', 'length', 'breadth', 'depth_height', 'quantity', 'date_measurement', 'gps_link', 'engineer_image', 'site_image', 'status', 'is_deleted']].copy()
         display_df.rename(columns={'gps_link': 'Location'}, inplace=True)
         display_df['Engineer Image'] = display_df['id'].apply(lambda x: f"/?view_image_id={x}&type=engineer")
         display_df['Site Work Image'] = display_df['id'].apply(lambda x: f"/?view_image_id={x}&type=site")

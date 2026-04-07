@@ -73,6 +73,7 @@ def generate_pdf_report(measurement_id):
     info_data = [
         ["Project Name:", record['project_name']],
         ["BOQ Number:", record['boq_number']],
+        ["Work Name:", record.get('work_name', 'N/A') or 'N/A'],
         ["Bill Number:", bill_no or "N/A"],
         ["Date:", record['prev_bill_date'] or record['date_measurement']]
     ]

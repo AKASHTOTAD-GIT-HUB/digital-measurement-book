@@ -143,6 +143,8 @@ def init_db():
         c.execute("ALTER TABLE measurements ADD COLUMN engineer_image TEXT")
     if meas_cols and 'site_image' not in meas_cols:
         c.execute("ALTER TABLE measurements ADD COLUMN site_image TEXT")
+    if meas_cols and 'work_name' not in meas_cols:
+        c.execute("ALTER TABLE measurements ADD COLUMN work_name TEXT")
             
     # Data migration
     from datetime import datetime
@@ -216,7 +218,7 @@ def generate_hash(boq_number, project_name, description, length, breadth, depth_
 
 def insert_measurement(boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement, 
                        description, number_items, length, breadth, depth_height, quantity, 
-                       remarks, gps_coordinates, selfie_image, site_photo_image, timestamp, gps_link, engineer_image, site_image):
+                       remarks, gps_coordinates, selfie_image, site_photo_image, timestamp, gps_link, engineer_image, site_image, work_name):
     
     hash_value = generate_hash(boq_number, project_name, description, length, breadth, depth_height, quantity, gps_coordinates, timestamp)
     
@@ -226,16 +228,16 @@ def insert_measurement(boq_number, project_name, project_id, contractor_name, su
         INSERT INTO measurements (
             boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement,
             description, number_items, length, breadth, depth_height, quantity,
-            remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, engineer_image, site_image
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, engineer_image, site_image, work_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (boq_number, project_name, project_id, contractor_name, sub_contractor_name, date_commencement, finish_date, date_measurement,
           description, number_items, length, breadth, depth_height, quantity,
-          remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, engineer_image, site_image))
+          remarks, gps_coordinates, selfie_image, site_photo_image, hash_value, timestamp, gps_link, engineer_image, site_image, work_name))
     conn.commit()
     conn.close()
     return hash_value
 
-def add_boq_description(project_id, boq_number, work_name, description):
+def add_boq_description(project_id, boq_number, description):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     # Check if BOQ number already exists for this project
@@ -246,9 +248,9 @@ def add_boq_description(project_id, boq_number, work_name, description):
         
     try:
         c.execute('''
-            INSERT INTO boq_descriptions (project_id, boq_number, work_name, description)
-            VALUES (?, ?, ?, ?)
-        ''', (project_id, str(boq_number), work_name, description))
+            INSERT INTO boq_descriptions (project_id, boq_number, description)
+            VALUES (?, ?, ?)
+        ''', (project_id, str(boq_number), description))
         conn.commit()
         success = True
         msg = "Success"
@@ -258,15 +260,15 @@ def add_boq_description(project_id, boq_number, work_name, description):
     conn.close()
     return success, msg
 
-def edit_boq_description(project_id, boq_number, new_work_name, new_description):
+def edit_boq_description(project_id, boq_number, new_description):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     try:
         c.execute('''
             UPDATE boq_descriptions
-            SET work_name = ?, description = ?
+            SET description = ?
             WHERE project_id = ? AND boq_number = ?
-        ''', (new_work_name, new_description, project_id, str(boq_number)))
+        ''', (new_description, project_id, str(boq_number)))
         conn.commit()
         success = True
     except Exception:

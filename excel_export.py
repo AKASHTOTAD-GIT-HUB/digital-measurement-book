@@ -31,7 +31,7 @@ def export_to_excel(project_id=None, measurement_id=None):
         
     # Sheet 1: Measurement entries
     measurement_cols = [
-        'id', 'boq_number', 'project_name', 'contractor_name', 'sub_contractor_name', 'date_commencement', 'finish_date', 'date_measurement',
+        'id', 'boq_number', 'work_name', 'project_name', 'contractor_name', 'sub_contractor_name', 'date_commencement', 'finish_date', 'date_measurement',
         'description', 'number_items', 'length', 'breadth', 'depth_height', 'quantity',
         'remarks', 'gps_coordinates', 'hash_value', 'timestamp', 'status', 'is_deleted'
     ]
@@ -39,7 +39,7 @@ def export_to_excel(project_id=None, measurement_id=None):
     
     # Sheet 2: Billing details (excluding deleted items)
     billing_cols = [
-        'boq_number', 'project_name', 'description', 'number_items', 'length', 'breadth', 'depth_height', 'quantity',
+        'boq_number', 'work_name', 'project_name', 'description', 'number_items', 'length', 'breadth', 'depth_height', 'quantity',
         'rate', 'amount', 'prev_bill_number', 'prev_bill_date', 'prev_bill_amount', 'total_payable', 'status'
     ]
     df_billing = df[df['is_deleted'] == 0][billing_cols].copy()
